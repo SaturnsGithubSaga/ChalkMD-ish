@@ -5,41 +5,111 @@
     <title>ChalkMD-ish</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1e1e1e">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
+    <!--
+      Security note: this app requests read/write access to a local folder via the
+      File System Access API, so a compromised CDN script would be a real risk.
+      Add Subresource Integrity hashes to the two tags below once you've generated
+      them yourself (e.g. via https://www.srihash.org or cdnjs' "Copy SRI" button) —
+      pin them to exactly 5.65.16, and re-generate if you ever bump the version.
+      crossorigin is already set so the integrity check will work once you add it.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'self';">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         body { font-family: monospace; display: flex; height: 100vh; margin: 0; background: #1e1e1e; color: #d4d4d4; }
-        #sidebar { width: 300px; border-right: 1px solid #333; padding: 10px; overflow-y: auto; }
-        #editor { flex: 1; display: flex; flex-direction: column; padding: 20px; }
-        .CodeMirror { flex: 1; height: auto; font-family: monospace; font-size: 14px; border: 1px solid #333; }
+        #sidebar { width: 300px; min-width: 220px; border-right: 1px solid #333; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; box-sizing: border-box; }
+        #sidebarHeader { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        #sidebarHeader img { width: 28px; height: 28px; border-radius: 4px; }
+        #sidebarHeader span { font-weight: bold; font-size: 15px; }
+
+        /* #editor is a flex sibling of the fixed-width sidebar. Without min-width:0
+           a very long, unbreakable line in the editor (e.g. a long image path or an
+           inline base64 image) can force this flex item wider than the viewport,
+           which pushes the sidebar out of view. overflow:hidden + min-width:0 stop
+           that, and word-break below makes sure long tokens wrap instead of
+           stretching the line. */
+        #editor { flex: 1; display: flex; flex-direction: column; padding: 20px; min-width: 0; overflow: hidden; box-sizing: border-box; }
+        .CodeMirror { flex: 1; height: auto; font-family: monospace; font-size: 14px; border: 1px solid #333; overflow: hidden; }
+        .CodeMirror-line, .CodeMirror-line-like { word-break: break-word; overflow-wrap: anywhere; }
+
         .cm-header-1 { font-size: 1.4em; font-weight: bold; color: #569cd6 !important; }
         .cm-header-2 { font-size: 1.3em; font-weight: bold; color: #4ec9b0 !important; }
         .cm-header-3 { font-size: 1.2em; font-weight: bold; color: #dcdcaa !important; }
         .cm-header-4, .cm-header-5, .cm-header-6 { font-weight: bold; color: #ce9178 !important; }
-        button { background: #0e639c; color: white; border: none; padding: 8px 15px; cursor: pointer; margin-bottom: 10px; width: 100%; }
+        /* Inline/fenced code was rendering in the theme's dark comment grey,
+           which is hard to read against the dark background. Lighter + a faint
+           chip background makes it read clearly as code without clashing with
+           the header colors above. */
+        .cm-comment { color: #e6db74 !important; background: rgba(255, 255, 255, 0.06); border-radius: 3px; }
+
+        button { background: #0e639c; color: white; border: none; padding: 8px 15px; cursor: pointer; margin-bottom: 8px; width: 100%; font-family: monospace; }
         button:hover { background: #1177bb; }
+        button:disabled { background: #444; cursor: not-allowed; }
+
+        #treeToolbar { display: flex; gap: 4px; margin-bottom: 8px; }
+        #treeToolbar button { width: auto; flex: 1; padding: 6px 4px; font-size: 13px; margin-bottom: 0; }
+
+        #fileTree { flex: 1; overflow-y: auto; }
         ul { list-style: none; padding-left: 15px; margin: 2px 0; }
-        li { margin: 4px 0; cursor: pointer; }
+        li { margin: 2px 0; cursor: pointer; padding: 2px 4px; border-radius: 3px; }
         li.file:hover { color: #4ec9b0; }
-        li.folder > span { font-weight: bold; color: #dcdcaa; }
+        li.folder > span { font-weight: bold; color: #dcdcaa; display: inline-block; padding: 2px 0; }
+        li.selected, .root-row.selected { background: #094771; color: #ffffff; }
+
+        .root-row { font-weight: bold; color: #dcdcaa; padding: 5px 4px; margin-bottom: 6px; cursor: pointer; border-radius: 3px; border-bottom: 1px solid #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        #editorTopBar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; color: #858585; }
+        #currentFile { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #saveStatus { font-size: 13px; white-space: nowrap; }
+        #saveStatus.unsaved { color: #e5c07b; }
+        #saveStatus.saved { color: #6a9955; }
+        #saveStatus.error { color: #f14c4c; }
+        #manualSave { width: auto; padding: 6px 14px; margin-bottom: 0; }
     </style>
 </head>
 <body>
     <div id="sidebar">
+        <div id="sidebarHeader">
+            <img src="icon.png" alt="ChalkMD-ish logo">
+            <span>ChalkMD-ish</span>
+        </div>
         <button id="openDir">Open Vault Folder</button>
+        <div id="treeToolbar">
+            <button id="refreshTree" title="Save the current file and refresh the list (never happens automatically)">⟳ Refresh</button>
+            <button id="newNote" title="New note inside the selected folder">📄+</button>
+            <button id="newFolder" title="New folder inside the selected folder">📁+</button>
+            <button id="deleteItem" title="Delete the selected file or folder">🗑</button>
+        </div>
         <div id="fileTree"></div>
     </div>
     <div id="editor">
-        <div id="currentFile" style="margin-bottom: 10px; color: #858585;">No file selected</div>
+        <div id="editorTopBar">
+            <div id="currentFile">No file selected</div>
+            <div id="saveStatus">—</div>
+            <button id="manualSave">Save</button>
+        </div>
         <textarea id="content"></textarea>
     </div>
 
     <script>
         let currentFileHandle = null;
         let rootDirHandle = null;
-        let isSaving = false;
+        let vaultName = '';
+
+        // path (relative to vault root, e.g. "folder/sub") -> { handle, kind, parentHandle, name }
+        // Rebuilt every time the tree is rebuilt; used to resolve create/delete/select targets.
+        const pathRegistry = new Map();
+        const expandedPaths = new Set();
+        let selectedPath = '';
+
+        let isDirty = false;
+        let loadingFile = false;
+        let saveTimeout = null;
+        let saveInProgress = false;
+        let saveAgainNeeded = false;
 
         const editor = CodeMirror.fromTextArea(document.getElementById('content'), {
             mode: 'markdown',
@@ -49,14 +119,19 @@
         });
 
         const openBtn = document.getElementById('openDir');
+        const saveStatusEl = document.getElementById('saveStatus');
+        const currentFileEl = document.getElementById('currentFile');
 
         window.addEventListener('DOMContentLoaded', async () => {
             try {
                 const handle = await getStoredHandle();
-                if (handle && (await verifyPermission(handle, false))) {
+                // Needs readwrite (not just read) up front, otherwise the first
+                // autosave after a browser restart fails silently.
+                if (handle && (await verifyPermission(handle, true))) {
                     rootDirHandle = handle;
+                    vaultName = handle.name;
                     openBtn.textContent = 'Change Vault Folder';
-                    await loadTree(rootDirHandle);
+                    await rebuildTree();
                 }
             } catch (err) {
                 console.log('No prior folder loaded automatically.');
@@ -65,26 +140,48 @@
 
         openBtn.addEventListener('click', async () => {
             try {
-                rootDirHandle = await window.showDirectoryPicker();
-                await storeHandle(rootDirHandle);
+                const handle = await window.showDirectoryPicker();
+                if (isDirty) await flushSave();
+                rootDirHandle = handle;
+                vaultName = handle.name;
+                await storeHandle(handle);
                 openBtn.textContent = 'Change Vault Folder';
-                await loadTree(rootDirHandle);
+                selectedPath = '';
+                expandedPaths.clear();
+                await rebuildTree();
             } catch (err) {
                 console.error(err);
             }
         });
 
-        async function loadTree(dirHandle) {
+        // ---------- Tree rendering ----------
+
+        async function rebuildTree() {
+            if (!rootDirHandle) return;
+            pathRegistry.clear();
+
             const treeContainer = document.getElementById('fileTree');
             treeContainer.innerHTML = '';
+
+            const rootRow = document.createElement('div');
+            rootRow.className = 'root-row';
+            rootRow.dataset.path = '';
+            rootRow.textContent = '🗂 ' + vaultName;
+            rootRow.title = 'Vault root — select this to create a note/folder here';
+            rootRow.addEventListener('click', () => selectItem(''));
+            treeContainer.appendChild(rootRow);
+
             const ul = document.createElement('ul');
-            await buildTree(dirHandle, ul);
+            await buildTree(rootDirHandle, ul, '');
             treeContainer.appendChild(ul);
+
+            highlightSelected();
         }
 
-        async function buildTree(dirHandle, parentElement) {
+        async function buildTree(dirHandle, parentElement, currentPath) {
             const entries = [];
             for await (const entry of dirHandle.values()) {
+                if (entry.name.startsWith('.')) continue; // keep dotfiles/dotfolders hidden
                 if (entry.kind === 'directory' || (entry.kind === 'file' && entry.name.endsWith('.md'))) {
                     entries.push(entry);
                 }
@@ -98,48 +195,229 @@
             });
 
             for (const entry of entries) {
+                const entryPath = currentPath ? currentPath + '/' + entry.name : entry.name;
+                pathRegistry.set(entryPath, {
+                    handle: entry,
+                    kind: entry.kind,
+                    parentHandle: dirHandle,
+                    name: entry.name
+                });
+
                 const li = document.createElement('li');
+                li.dataset.path = entryPath;
+
                 if (entry.kind === 'directory') {
                     li.className = 'folder';
                     const span = document.createElement('span');
                     span.textContent = '📁 ' + entry.name;
                     const subUl = document.createElement('ul');
-                    subUl.style.display = 'none';
+                    const isExpanded = expandedPaths.has(entryPath);
+                    subUl.style.display = isExpanded ? 'block' : 'none';
                     span.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        subUl.style.display = subUl.style.display === 'none' ? 'block' : 'none';
+                        const nowExpanded = subUl.style.display === 'none';
+                        subUl.style.display = nowExpanded ? 'block' : 'none';
+                        if (nowExpanded) expandedPaths.add(entryPath); else expandedPaths.delete(entryPath);
+                        selectItem(entryPath);
                     });
                     li.appendChild(span);
                     li.appendChild(subUl);
-                    await buildTree(entry, subUl);
+                    await buildTree(entry, subUl, entryPath);
                 } else {
                     li.className = 'file';
                     li.textContent = '📄 ' + entry.name;
                     li.addEventListener('click', async (e) => {
                         e.stopPropagation();
-                        currentFileHandle = entry;
-                        const file = await entry.getFile();
-                        editor.setValue(await file.text());
-                        document.getElementById('currentFile').textContent = entry.name;
+                        selectItem(entryPath);
+                        await openFile(entry);
                     });
                 }
                 parentElement.appendChild(li);
             }
         }
 
-        editor.on('change', async () => {
-            if (!currentFileHandle || isSaving) return;
-            isSaving = true;
+        function selectItem(path) {
+            selectedPath = path;
+            highlightSelected();
+        }
+
+        function highlightSelected() {
+            document.querySelectorAll('#fileTree [data-path]').forEach(el => {
+                el.classList.toggle('selected', el.dataset.path === selectedPath);
+            });
+        }
+
+        function getActiveTargetDirHandle() {
+            if (!selectedPath) return rootDirHandle;
+            const entry = pathRegistry.get(selectedPath);
+            if (!entry) return rootDirHandle;
+            return entry.kind === 'directory' ? entry.handle : entry.parentHandle;
+        }
+
+        // ---------- File open / save ----------
+
+        async function openFile(entry) {
+            if (currentFileHandle && isDirty) {
+                await flushSave();
+            }
+            currentFileHandle = entry;
+            loadingFile = true;
+            const file = await entry.getFile();
+            editor.setValue(await file.text());
+            loadingFile = false;
+            isDirty = false;
+            currentFileEl.textContent = entry.name;
+            updateSaveIndicator('idle');
+        }
+
+        editor.on('change', () => {
+            if (loadingFile || !currentFileHandle) return;
+            isDirty = true;
+            updateSaveIndicator('unsaved');
+            scheduleSave();
+        });
+
+        function scheduleSave(delay = 800) {
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(doSave, delay);
+        }
+
+        // Replaces the old isSaving boolean guard, which silently dropped any
+        // keystrokes that landed while a save was already in flight. This version
+        // queues a follow-up save instead of dropping it, so nothing typed is lost.
+        async function doSave() {
+            if (!currentFileHandle) return;
+            if (saveInProgress) {
+                saveAgainNeeded = true;
+                return;
+            }
+            saveInProgress = true;
+            updateSaveIndicator('saving');
             try {
                 const writable = await currentFileHandle.createWritable();
                 await writable.write(editor.getValue());
                 await writable.close();
+                isDirty = false;
+                updateSaveIndicator('saved');
             } catch (err) {
                 console.error('Save failed:', err);
+                updateSaveIndicator('error');
             } finally {
-                isSaving = false;
+                saveInProgress = false;
+                if (saveAgainNeeded) {
+                    saveAgainNeeded = false;
+                    doSave();
+                }
+            }
+        }
+
+        async function flushSave() {
+            if (saveTimeout) {
+                clearTimeout(saveTimeout);
+                saveTimeout = null;
+            }
+            await doSave();
+            while (saveInProgress) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+
+        function updateSaveIndicator(state) {
+            saveStatusEl.classList.remove('unsaved', 'saved', 'error');
+            if (state === 'unsaved') {
+                saveStatusEl.textContent = '● Unsaved changes';
+                saveStatusEl.classList.add('unsaved');
+            } else if (state === 'saving') {
+                saveStatusEl.textContent = 'Saving…';
+            } else if (state === 'saved') {
+                saveStatusEl.textContent = '✓ Saved ' + new Date().toLocaleTimeString();
+                saveStatusEl.classList.add('saved');
+            } else if (state === 'error') {
+                saveStatusEl.textContent = '⚠ Save failed';
+                saveStatusEl.classList.add('error');
+            } else {
+                saveStatusEl.textContent = '—';
+            }
+        }
+
+        document.getElementById('manualSave').addEventListener('click', async () => {
+            if (!currentFileHandle) return;
+            await flushSave();
+        });
+
+        // Real disk-level flushing on tab close isn't possible (createWritable is
+        // async and browsers won't reliably await it during unload), so this does
+        // a best-effort save AND warns the user if there are unsaved changes.
+        window.addEventListener('beforeunload', (e) => {
+            if (isDirty) {
+                doSave();
+                e.preventDefault();
+                e.returnValue = '';
             }
         });
+
+        // ---------- Refresh (manual only — the tree never auto-refreshes) ----------
+
+        document.getElementById('refreshTree').addEventListener('click', async () => {
+            await flushSave();
+            await rebuildTree();
+        });
+
+        // ---------- Create / delete ----------
+
+        document.getElementById('newNote').addEventListener('click', async () => {
+            if (!rootDirHandle) { alert('Open a vault folder first.'); return; }
+            const name = prompt('New note name:', 'Untitled.md');
+            if (!name) return;
+            const fileName = name.toLowerCase().endsWith('.md') ? name : name + '.md';
+            const targetDir = getActiveTargetDirHandle();
+            try {
+                await targetDir.getFileHandle(fileName, { create: true });
+                await rebuildTree();
+            } catch (err) {
+                alert('Could not create note: ' + err.message);
+            }
+        });
+
+        document.getElementById('newFolder').addEventListener('click', async () => {
+            if (!rootDirHandle) { alert('Open a vault folder first.'); return; }
+            const name = prompt('New folder name:');
+            if (!name) return;
+            const targetDir = getActiveTargetDirHandle();
+            try {
+                await targetDir.getDirectoryHandle(name, { create: true });
+                expandedPaths.add(selectedPath ? selectedPath : '');
+                await rebuildTree();
+            } catch (err) {
+                alert('Could not create folder: ' + err.message);
+            }
+        });
+
+        document.getElementById('deleteItem').addEventListener('click', async () => {
+            if (!selectedPath) { alert('Select a file or folder to delete first.'); return; }
+            const entry = pathRegistry.get(selectedPath);
+            if (!entry) return;
+            const label = entry.kind === 'directory' ? 'folder (and everything in it)' : 'note';
+            if (!confirm(`Delete ${label} "${entry.name}"? This cannot be undone.`)) return;
+            try {
+                await entry.parentHandle.removeEntry(entry.name, { recursive: true });
+                if (currentFileHandle === entry.handle) {
+                    currentFileHandle = null;
+                    isDirty = false;
+                    loadingFile = true;
+                    editor.setValue('');
+                    loadingFile = false;
+                    currentFileEl.textContent = 'No file selected';
+                    updateSaveIndicator('idle');
+                }
+                selectedPath = '';
+                await rebuildTree();
+            } catch (err) {
+                alert('Could not delete: ' + err.message);
+            }
+        });
+
+        // ---------- IndexedDB handle storage ----------
 
         function getDB() {
             return new Promise((resolve, reject) => {

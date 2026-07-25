@@ -2,6 +2,7 @@
   "name": "ChalkMD-ish",
   "short_name": "ChalkMD-ish",
   "start_url": "chalkmdish.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#1e1e1e",
   "theme_color": "#1e1e1e",
